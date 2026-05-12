@@ -71,7 +71,6 @@ Auf Basis der Cluster wurde eine Empfehlungsfunktion implementiert, die zu einem
 ├── notebooks/
 │   └── 01_eda.ipynb       # EDA, Klassifikation & Clustering
 ├── .gitignore
-├── requirements.txt
 ├── pyproject.toml
 └── README.md
 ```
