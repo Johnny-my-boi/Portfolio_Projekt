@@ -11,58 +11,74 @@ Dieses Projekt analysiert den [MyAnimeList Datensatz (2020)](https://www.kaggle.
 
 - **Quelle:** Hernan4444 – Anime Recommendation Database 2020 (Kaggle)
 - **Umfang:** 17.562 Anime, davon 12.421 mit Score
-- **Features:** Genre, Studio, Type (TV/Movie/OVA), Source (Manga/Original/Light Novel), Episodenzahl, Mitgliederzahl u.a.
+- **Features:** Genre, Studio, Type (TV/Movie/OVA), Source (Manga/Original/Light Novel), Rating, Episodenzahl u.a.
 
 ## Methodik
 
 ### Datenbereinigung
 - "Unknown"-Werte durch NaN ersetzt
 - Datentypen korrigiert (Score, Episodes, Ranked → numerisch)
-- Genres aus kommaseparierten Strings in One-Hot-Encoding überführt (Top 14 Genres)
 
 ### Explorative Datenanalyse (EDA)
 - Score-Verteilung analysiert: Durchschnitt bei 6.5, nur 4.3% der Anime über 8.0
 - TV-Anime erzielen die höchsten Durchschnittscores nach Type
 - Light Novels und Manga-Adaptionen scoren am höchsten nach Source
 - Comedy, Action und Fantasy sind die häufigsten Genres
+- Korrelationsanalyse, Genre-Genre-Heatmap und PCA zur Feature-Exploration
+
+### Feature Engineering
+
+**Für die Klassifikation (`feature_cols`):**
+- Genres (One-Hot, alle 43 validen Genres mit ≥ 20 Anime)
+- Source (One-Hot, 13 Typen)
+- Rating (One-Hot: G, PG, PG-13, R, R+, Rx)
+- `is_TV` (Type-Flag)
+- `studio_avg_score` (Durchschnittsscore des besten Studios eines Anime)
+- Korrelations-Filter: nur Features mit |Pearson r| ≥ 0.05 mit `Top_Rated`
+
+**Bewusst ausgeschlossen:**
+- *Members* — zirkulär: viele Members, *weil* beliebt, nicht umgekehrt
+- *Episodes* — zirkulär: eine Serie läuft weiter, *weil* sie erfolgreich ist
+
+**Für Clustering & Cosine Similarity (`cluster_features`):**
+- Alle validen Genres + `is_TV`, `is_Manga`, `is_LightNovel` + Rating (One-Hot)
 
 ### Klassifikation
-Zielvariable: Top-Rated (Score > 8.0) – binäre Klassifikation mit stark unbalancierten Klassen (4.3% positiv).
+Zielvariable: Top-Rated (Score > 8.0) — binäre Klassifikation mit stark unbalancierten Klassen (4,3% positiv).
 
 | Modell | Precision (Top-Rated) | Recall (Top-Rated) | F1-Score |
 |---|---|---|---|
-| Baseline (Logistic Regression, ohne SMOTE) | 0.79 | 0.26 | 0.39 |
-| Logistic Regression + SMOTE | 0.28 | 0.66 | 0.39 |
-| Random Forest + SMOTE | 0.51 | 0.52 | 0.52 |
-| Random Forest + SMOTE (ohne Members) | 0.12 | 0.39 | 0.18 |
+| Baseline (Logistic Regression, ohne SMOTE) | 0.50 | 0.07 | 0.13 |
+| Logistic Regression + SMOTE | 0.16 | 0.66 | 0.25 |
+| Random Forest + SMOTE | 0.43 | 0.44 | 0.43 |
+| Random Forest + SMOTE (Tuned) | 0.42 | 0.42 | 0.42 |
+| **XGBoost** (scale_pos_weight = 22.3) | **0.35** | **0.58** | **0.44** |
 
-**Zentrale Erkenntnis:** Die Mitgliederzahl (Members) ist mit 55% der wichtigste Prädiktor, stellt aber eine zirkuläre Abhängigkeit dar – ein Anime hat viele Members *weil* er beliebt ist, nicht umgekehrt. Ohne Members ist die Vorhersagekraft der inhaltlichen Features (Genre, Type, Source) deutlich begrenzt.
+**Zentrale Erkenntnisse:**
+- XGBoost mit `scale_pos_weight` ist das beste Modell für dieses unbalancierte Problem (F1 = 0.44, Recall = 58%)
+- SMOTE verbessert den Recall drastisch, senkt aber die Precision stark
+- Hyperparameter-Tuning (GridSearchCV) bringt bei Random Forest keinen nennenswerten Gewinn
+- Ohne Members gibt es kein dominantes Feature — `studio_avg_score`, Source und einzelne Genres sind die wichtigsten Prädiktoren
 
 ### Clustering
-KMeans-Clustering mit 5 Clustern auf Basis der Genre-, Type- und Source-Features:
+KMeans-Clustering auf Basis von Genres, Type, Source-Flags und Rating. Die optimale Cluster-Anzahl wird automatisch per **Silhouette Score** (k = 2–50) bestimmt. Cluster-Namen werden aus den zwei dominantesten Genres jedes Clusters abgeleitet.
 
-| Cluster | Beschreibung | Anzahl | Avg Score |
-|---|---|---|---|
-| 0 | Mecha & Sci-Fi | 935 | 6.61 |
-| 1 | Fantasy & Magic | 906 | 6.77 |
-| 2 | Allgemein / Nische | 4.652 | 6.05 |
-| 3 | Romantic Comedy / Alltag | 2.811 | 6.87 |
-| 4 | Battle Shounen | 3.117 | 6.77 |
+Auf Basis der Cluster wurde eine Empfehlungsfunktion implementiert, die zu einem gegebenen Anime ähnliche Titel per **Cosine Similarity** vorschlägt — bei Gleichstand nach Score sortiert.
 
-Auf Basis der Cluster wurde eine Empfehlungsfunktion implementiert, die zu einem gegebenen Anime ähnliche Titel aus demselben Cluster vorschlägt.
+## CLI-Empfehlungssystem
 
-## Ergebnisse & Fazit
-
-- **SMOTE** verbessert den Recall für die Minderheitsklasse erheblich (26% → 66% bei Logistic Regression)
-- **Random Forest** liefert das beste Gesamtergebnis bei der Klassifikation
-- **Anime-Erfolg** lässt sich aus inhaltlichen Merkmalen allein schwer vorhersagen – Popularität (Members) dominiert
-- **Clustering** ergibt interpretierbare Gruppen, die für ein einfaches Empfehlungssystem genutzt werden können
+```bash
+uv run main.py "Fullmetal Alchemist"
+# oder interaktiv:
+uv run main.py
+```
 
 ## Technologien
 
 - Python (pandas, numpy, matplotlib, seaborn)
-- scikit-learn (Logistic Regression, Random Forest, KMeans)
+- scikit-learn (Logistic Regression, Random Forest, KMeans, PCA, SMOTE)
 - imbalanced-learn (SMOTE)
+- xgboost
 
 ## Projektstruktur
 
@@ -70,6 +86,7 @@ Auf Basis der Cluster wurde eine Empfehlungsfunktion implementiert, die zu einem
 ├── data/                  # Datensätze (nicht in Git)
 ├── notebooks/
 │   └── 01_eda.ipynb       # EDA, Klassifikation & Clustering
+├── main.py                # CLI-Empfehlungssystem
 ├── .gitignore
 ├── pyproject.toml
 └── README.md
