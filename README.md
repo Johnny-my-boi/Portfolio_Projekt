@@ -1,92 +1,73 @@
-# Anime-Erfolg klassifizieren & Empfehlungssystem
+# Anime-Analyse & Empfehlungssystem
 
-## Projektbeschreibung
+Datenanalyse-Projekt auf dem [MyAnimeList Datensatz 2020](https://www.kaggle.com/datasets/hernan4444/anime-recommendation-database-2020) mit zwei Fokusthemen, jeweils in einem eigenen Notebook:
 
-Dieses Projekt analysiert den [MyAnimeList Datensatz (2020)](https://www.kaggle.com/datasets/hernan4444/anime-recommendation-database-2020) mit über 17.500 Anime-Einträgen. Es verfolgt zwei Ziele:
+## 📓 Notebooks
 
-1. **Klassifikation:** Welche Eigenschaften machen einen Anime "Top-Rated" (Score > 8.0)?
-2. **Clustering:** Welche Anime-Gruppen gibt es, und welche ähnlichen Anime kann man basierend darauf empfehlen?
+### [`notebooks/01_top_anime.ipynb`](notebooks/01_top_anime.ipynb) — Was macht einen Top-Anime aus?
 
-## Datensatz
+Datengetriebene Analyse über 17.562 Anime-Einträge mit Score-Bewertungen.
 
-- **Quelle:** Hernan4444 – Anime Recommendation Database 2020 (Kaggle)
-- **Umfang:** 17.562 Anime, davon 12.421 mit Score
-- **Features:** Genre, Studio, Type (TV/Movie/OVA), Source (Manga/Original/Light Novel), Rating, Episodenzahl u.a.
+| Teil | Inhalt |
+|---|---|
+| Regression | Vorhersage des Anime-Scores (1.85–9.19) aus inhaltlichen Features |
+| Top-Analyse | Binärer Klassifikator: was unterscheidet Top-Animes (Score ≥ 8) vom Rest? |
 
-## Methodik
+**Ergebnisse:**
+- **XGBoost** mit GridSearchCV: R² = 0.587 (K = 34, `n_estimators=300, max_depth=7, lr=0.05`)
+- **Top-Klassifikator** (Logistic Regression balanced): ROC-AUC 0.905
+- **Top-Prädiktoren:** `studio_avg_score` (+1.19), `duration_min` (+0.58), `is_TV` (+0.52), `src_Manga` (+0.41), `Drama` (+0.33)
 
-### Datenbereinigung
-- "Unknown"-Werte durch NaN ersetzt
-- Datentypen korrigiert (Score, Episodes, Ranked → numerisch)
+### [`notebooks/02_empfehlung.ipynb`](notebooks/02_empfehlung.ipynb) — Item-based Empfehlungssystem
 
-### Explorative Datenanalyse (EDA)
-- Score-Verteilung analysiert: Durchschnitt bei 6.5, nur 4.3% der Anime über 8.0
-- TV-Anime erzielen die höchsten Durchschnittscores nach Type
-- Light Novels und Manga-Adaptionen scoren am höchsten nach Source
-- Comedy, Action und Fantasy sind die häufigsten Genres
-- Korrelationsanalyse, Genre-Genre-Heatmap und PCA zur Feature-Exploration
+Collaborative Filtering auf 109M User-Anime-Interaktionen + 57.6M Bewertungen.
 
-### Feature Engineering
+**5 Varianten verglichen** auf 500 sampled Usern (≥20 Bewertungen) mit Hold-Out-Evaluation:
 
-**Für die Klassifikation (`feature_cols`):**
-- Genres (One-Hot, alle 43 validen Genres mit ≥ 20 Anime)
-- Source (One-Hot, 13 Typen)
-- Rating (One-Hot: G, PG, PG-13, R, R+, Rx)
-- `is_TV` (Type-Flag)
-- `studio_avg_score` (Durchschnittsscore des besten Studios eines Anime)
-- Korrelations-Filter: nur Features mit |Pearson r| ≥ 0.05 mit `Top_Rated`
+| Variante | Hit@10 | Precision@10 | NDCG@10 | Diversity | Novelty |
+|---|---|---|---|---|---|
+| Rating-basiert | 89.8 % | 0.412 | 0.446 | 0.482 | 2.20 |
+| Composite Engagement | 90.4 % | 0.408 | 0.442 | 0.490 | 2.12 |
+| Hybrid (α=0.7, CF + Content) | 89.8 % | 0.351 | 0.382 | 0.345 | **2.38** |
+| **MMR (λ=0.8)** | **92.4 %** | **0.411** | 0.443 | **0.608** | 2.01 |
+| MMR (λ=0.4) | 88.8 % | 0.350 | 0.383 | 0.681 | 1.92 |
 
-**Bewusst ausgeschlossen:**
-- *Members* — zirkulär: viele Members, *weil* beliebt, nicht umgekehrt
-- *Episodes* — zirkulär: eine Serie läuft weiter, *weil* sie erfolgreich ist
+**Bestes Modell:** MMR-Re-Ranking bei λ=0.8 — Pareto-Verbesserung über pure CF (mehr Vielfalt OHNE Verlust bei Relevanz). Außerdem Multi-Seed-Empfehlungen über Centroid-Query.
 
-**Für Clustering & Cosine Similarity (`cluster_features`):**
-- Alle validen Genres + `is_TV`, `is_Manga`, `is_LightNovel` + Rating (One-Hot)
+## Datenquellen
 
-### Klassifikation
-Zielvariable: Top-Rated (Score > 8.0) — binäre Klassifikation mit stark unbalancierten Klassen (4,3% positiv).
+- `anime.csv` (5.5 MB) — 17.562 Anime mit Metadaten (Genre, Studio, Score, Type, Source, Rating, Members, …)
+- `rating_complete.csv` (781 MB) — 57.6M Bewertungen (nur completed+rated)
+- `animelist.csv` (1.9 GB) — 109M User-Anime-Interaktionen (alle Status)
+- `watching_status.csv` — Status-Code-Lookup
 
-| Modell | Precision (Top-Rated) | Recall (Top-Rated) | F1-Score |
-|---|---|---|---|
-| Baseline (Logistic Regression, ohne SMOTE) | 0.50 | 0.07 | 0.13 |
-| Logistic Regression + SMOTE | 0.16 | 0.66 | 0.25 |
-| Random Forest + SMOTE | 0.43 | 0.44 | 0.43 |
-| Random Forest + SMOTE (Tuned) | 0.42 | 0.42 | 0.42 |
-| **XGBoost** (scale_pos_weight = 22.3) | **0.35** | **0.58** | **0.44** |
+## Pipeline-Struktur
 
-**Zentrale Erkenntnisse:**
-- XGBoost mit `scale_pos_weight` ist das beste Modell für dieses unbalancierte Problem (F1 = 0.44, Recall = 58%)
-- SMOTE verbessert den Recall drastisch, senkt aber die Precision stark
-- Hyperparameter-Tuning (GridSearchCV) bringt bei Random Forest keinen nennenswerten Gewinn
-- Ohne Members gibt es kein dominantes Feature — `studio_avg_score`, Source und einzelne Genres sind die wichtigsten Prädiktoren
-
-### Clustering
-KMeans-Clustering auf Basis von Genres, Type, Source-Flags und Rating. Die optimale Cluster-Anzahl wird automatisch per **Silhouette Score** (k = 2–50) bestimmt. Cluster-Namen werden aus den zwei dominantesten Genres jedes Clusters abgeleitet.
-
-Auf Basis der Cluster wurde eine Empfehlungsfunktion implementiert, die zu einem gegebenen Anime ähnliche Titel per **Cosine Similarity** vorschlägt — bei Gleichstand nach Score sortiert.
-
-## CLI-Empfehlungssystem
-
-```bash
-uv run main.py "Fullmetal Alchemist"
-# oder interaktiv:
-uv run main.py
-```
+Alle Modelle verwenden durchgängig `sklearn.Pipeline`:
+- **Regression/Klassifikation:** `SelectKBest → StandardScaler → Modell`
+- **Empfehlung:** `Normalizer → NearestNeighbors`
+- **MMR** sitzt **post-hoc** auf der CF-Pipeline (kein Re-Training)
 
 ## Technologien
 
-- Python (pandas, numpy, matplotlib, seaborn)
-- scikit-learn (Logistic Regression, Random Forest, KMeans, PCA, SMOTE)
-- imbalanced-learn (SMOTE)
-- xgboost
+- Python (pandas, numpy, matplotlib, seaborn, scipy)
+- scikit-learn (Pipeline, SelectKBest, StandardScaler, Normalizer, NearestNeighbors, LinearRegression, RandomForestRegressor, LogisticRegression, GridSearchCV)
+- xgboost (XGBRegressor, XGBClassifier)
 
 ## Projektstruktur
 
 ```
-├── data/                  # Datensätze (nicht in Git)
+├── data/                       # nicht in Git
+│   ├── anime.csv
+│   ├── rating_complete.csv
+│   ├── animelist.csv
+│   └── watching_status.csv
 ├── notebooks/
-│   └── 01_eda.ipynb       # EDA, Klassifikation & Clustering
-├── main.py                # CLI-Empfehlungssystem
+│   ├── 01_top_anime.ipynb      # Regression + Top-Anime-Klassifikator
+│   └── 02_empfehlung.ipynb     # Empfehlungssystem (5 Varianten + MMR + Multi-Seed)
+├── presentation/               # 10-Min-Abschlusspräsentation
+│   ├── summary.md
+│   └── figures/
 ├── .gitignore
 ├── pyproject.toml
 └── README.md
@@ -99,3 +80,5 @@ git clone https://github.com/Johnny-my-boi/Portfolio_Projekt.git
 cd Portfolio_Projekt
 uv sync
 ```
+
+Daten aus dem Kaggle-Link in `data/` ablegen, dann die Notebooks in `notebooks/` ausführen.
